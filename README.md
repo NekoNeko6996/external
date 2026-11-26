@@ -94,5 +94,50 @@ Modulith:
 
 Kafka consumer (điều khiển `@KafkaListener` trong `ExternalizedApplication`):
 
-- **`group-id: externalized-demo`** — định danh nhóm consumer (consumer group) trong Kafka. Các consumer nằm trong cùng một nhóm sẽ chia sẻ các phân vùng (partition) của một topic; nếu chỉ có một mình, consumer này sẽ đọc toàn bộ dữ liệu.
-- **`auto-offset-reset: earliest`** — khi...
+- **`group-id: externalized-demo`** — Định danh nhóm consumer Kafka. Các consumer trong cùng một nhóm sẽ chia sẻ các phân vùng (partition) của một topic; nếu hoạt động độc lập, một consumer sẽ đọc toàn bộ dữ liệu.
+- **`auto-offset-reset: earliest`** — Khi nhóm chưa có offset nào được xác nhận (lần chạy đầu tiên hoặc sau khi thực hiện `docker compose down -v`), consumer sẽ bắt đầu đọc từ đầu topic thay vì chỉ nhận "các tin nhắn mới kể từ thời điểm hiện tại". Thiết lập này rất hữu ích cho các bản demo, giúp đảm bảo rằng ngay cả những tin nhắn được gửi trước khi consumer tham gia vẫn sẽ được hiển thị.
+- **`value-deserializer: …StringDeserializer`** — Mặc định, Spring Boot sử dụng `ByteArrayDeserializer`, khiến tin nhắn nhận về dưới dạng `byte[]` và hiển thị trong log là các chuỗi số như `[123, 34, …]`. Việc chuyển sang `StringDeserializer` giúp giải mã các byte này theo chuẩn UTF-8, nhờ đó nội dung JSON trở nên dễ đọc hơn. (Nếu muốn xử lý payload theo kiểu dữ liệu cụ thể, bạn có thể sử dụng `JsonDeserializer` kèm cấu hình `trusted-packages` — tuy nhiên, cách này hơi phức tạp so với nhu cầu của bản demo này.)
+
+Logging:
+
+- Việc thiết lập mức log `WARN` cho bốn lớp (class) Kafka giúp loại bỏ các thông báo dài dòng như `ConsumerConfig values: { ... }` / `ProducerConfig values: { ... }` và thông tin `Kafka version: 4.1.2` thường xuất hiện mỗi khi client khởi chạy. Đây chỉ là thao tác giúp làm gọn log; bạn có thể tạm thời xóa các thiết lập này nếu cần gỡ lỗi (debug) cấu hình của client.
+
+## Spring Initializr
+
+Được tạo từ [start.spring.io](https://start.spring.io/#!type=maven-project&language=java&platformVersion=4.0.6&packaging=jar&configurationFileFormat=yaml&jvmVersion=26&groupId=dev.danvega&artifactId=externalized&packageName=dev.danvega.externalized&dependencies=web,modulith,kafka,data-jdbc,docker-compose,postgresql) với các tùy chọn sau:
+
+| Thiết lập     | Giá trị                            |
+|---------------|------------------------------------|
+| Project       | Maven                              |
+| Ngôn ngữ      | Java                               |
+| Spring Boot   | 4.0.6                              |
+| Java          | 26                                 |
+| Đóng gói      | jar                                |
+| Group         | `dev.danvega`                      |
+| Artifact      | `externalized`                     |
+| Định dạng cấu hình | YAML (`application.yaml`)          |
+
+Các phụ thuộc (dependencies) và lý do sử dụng:
+
+- **Spring Web** — cung cấp REST endpoint `/api/posts`.
+- **Spring Modulith** — xác định ranh giới mô-đun (`@ApplicationModuleListener`, `ApplicationModules.verify()`) và hỗ trợ đưa sự kiện ra bên ngoài (`@Externalized`).
+- **Spring for Apache Kafka** — bao gồm Kafka client và `KafkaTemplate` được cấu hình tự động (được Modulith sử dụng để phát hành sự kiện), cùng với `@KafkaListener` để tiêu thụ (consume) dữ liệu từ topic phục vụ cho bản demo này.
+- **Spring Data JDBC** — tích hợp JDBC và `DataSource`; thành phần này được registry quản lý phát hành sự kiện của Modulith sử dụng để lưu trữ các sự kiện dưới dạng bảng "outbox" (bảng `event_publication`) nhằm đảm bảo tính giao dịch.
+- **Docker Compose Support** — tự động khởi chạy các dịch vụ được định nghĩa trong `compose.yaml` khi chạy lệnh `./mvnw spring-boot:run`, không cần phải thực hiện thủ công lệnh `docker compose up`.
+- **PostgreSQL Driver** — driver JDBC dành cho container Postgres được khởi chạy thông qua Docker Compose.
+
+## Tài liệu
+
+Tính năng trọng tâm của bản demo này:
+
+- [Externalizing Application Events (Đưa các sự kiện ứng dụng ra bên ngoài)](https://docs.spring.io/spring-modulith/reference/events.html#externalization) — bao gồm `@Externalized`, cú pháp xác định đích/routing-key (`"topic::#{spel}"`) và bảng tổng hợp các broker được hỗ trợ.
+
+Các tài liệu khác về Spring Modulith:
+
+- [Fundamentals (Các khái niệm cơ bản)](https://docs.spring.io/spring-modulith/reference/fundamentals.html) — giải thích về API của một mô-đun, lý do tại sao các gói con (sub-package) mặc định được coi là nội bộ (internal), các giao diện được đặt tên (named interfaces), và khái niệm OPEN so với CLOSED.
+- [Working with Application Events (Làm việc với các sự kiện ứng dụng)](https://docs.spring.io/spring-modulith/reference/events.html) — bao gồm `@ApplicationModuleListener`, registry quản lý phát hành sự kiện, và cơ chế đảm bảo sự kiện được gửi ít nhất một lần (at-least-once delivery). - [Xác minh cấu trúc mô-đun (Verifying Module Structure)](https://docs.spring.io/spring-modulith/reference/verification.html) — tìm hiểu những gì `ApplicationModules.verify()` kiểm tra và cách phương thức này làm gián đoạn quá trình xây dựng (build) khi phát hiện các vi phạm.
+
+Liên quan đến Spring Boot / Kafka:
+
+- [Gửi/nhận thông điệp với Apache Kafka (Messaging with Apache Kafka)](https://docs.spring.io/spring-boot/4.0.6/reference/messaging/kafka.html) — cơ chế tự động cấu hình (autoconfiguration) Kafka trong Spring Boot.
+- [Dịch vụ phát triển với Docker Compose (Docker Compose Dev Service)](https://docs.spring.io/spring-boot/4.0.6/reference/features/dev-services.html#features.dev-services.docker-compose) — cách tệp `compose.yaml` được tích hợp vào quy trình phát triển (dev loop).
